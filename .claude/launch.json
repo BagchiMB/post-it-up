@@ -1,0 +1,23 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "metro",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "start", "-w", "apps/mobile", "--", "--dev-client", "--port", "8081"],
+      "port": 8081
+    },
+    {
+      "name": "web-preview",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "web", "-w", "apps/mobile", "--", "--port", "8081"],
+      "port": 8081
+    },
+    {
+      "name": "server",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "dev", "-w", "apps/server"],
+      "port": 8787
+    }
+  ]
+}

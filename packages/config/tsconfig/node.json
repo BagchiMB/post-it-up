@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json.schemastore.org/tsconfig",
+  "display": "Post It Up Node (ESM, run with tsx)",
+  "extends": "./base.json",
+  "compilerOptions": {
+    "target": "ES2023",
+    "lib": ["ES2023"],
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "erasableSyntaxOnly": true,
+    "verbatimModuleSyntax": true
+  }
+}

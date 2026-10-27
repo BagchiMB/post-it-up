@@ -1,0 +1,32 @@
+{
+  "name": "post-it-up",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Post It Up: Expo app + Node server (npm workspaces)",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev:mobile": "npm run start -w apps/mobile",
+    "dev:server": "npm run dev -w apps/server",
+    "ios": "npm run ios -w apps/mobile",
+    "lint": "npm run lint --workspaces --if-present",
+    "lint:fix": "npm run lint:fix --workspaces --if-present",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "test": "npm test -w apps/server",
+    "check": "npm run typecheck && npm run lint && npm run format:check && npm test",
+    "prepare": "husky"
+  },
+  "devDependencies": {
+    "@postitup/config": "*",
+    "husky": "^9.1.7",
+    "lint-staged": "^17.6.0",
+    "prettier": "^3.9.10"
+  },
+  "engines": {
+    "node": ">=23"
+  }
+}

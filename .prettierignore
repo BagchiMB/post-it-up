@@ -1,0 +1,15 @@
+node_modules/
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
+bun.lock
+.expo/
+dist/
+web-build/
+coverage/
+apps/mobile/ios/
+apps/mobile/android/
+apps/mobile/modules/spotify-remote/ios/SpotifyiOS.xcframework/
+apps/mobile/expo-env.d.ts
+apps/server/data/
+.husky/_/

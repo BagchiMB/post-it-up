@@ -1,0 +1,34 @@
+{
+  "name": "@postitup/server",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Post It Up API server",
+  "type": "module",
+  "main": "src/index.ts",
+  "scripts": {
+    "dev": "node --experimental-sqlite --disable-warning=ExperimentalWarning --watch --import tsx src/index.ts",
+    "start": "node --experimental-sqlite --disable-warning=ExperimentalWarning --import tsx src/index.ts",
+    "typecheck": "tsc --noEmit -p .",
+    "test": "node --experimental-sqlite --disable-warning=ExperimentalWarning --import tsx --test test/*.test.ts",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix"
+  },
+  "dependencies": {
+    "@hono/node-server": "^2.1.5",
+    "@postitup/shared": "*",
+    "hono": "^4.13.14"
+  },
+  "devDependencies": {
+    "@postitup/config": "*",
+    "@types/node": "^26.6.5",
+    "eslint": "^9.39.5",
+    "globals": "^17.13.0",
+    "tsx": "^4.23.15",
+    "typescript": "~6.0.3",
+    "typescript-eslint": "^8.72.1"
+  },
+  "engines": {
+    "node": ">=22.13"
+  },
+  "license": "ISC"
+}
