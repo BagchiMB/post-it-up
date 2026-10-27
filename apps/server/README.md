@@ -25,7 +25,7 @@ npm test               # = npm test -w apps/server (throwaway data dir, no netwo
 
 Check it: `curl http://localhost:8787/health`.
 
-On Node 23.0 `node:sqlite` needs `--experimental-sqlite`; the npm scripts pass it (harmless on newer Node).
+Needs Node 24 (see the root `.nvmrc`); `node:sqlite` is built in, no flags needed.
 
 ## Environment
 

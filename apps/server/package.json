@@ -6,10 +6,10 @@
   "type": "module",
   "main": "src/index.ts",
   "scripts": {
-    "dev": "node --experimental-sqlite --disable-warning=ExperimentalWarning --watch --import tsx src/index.ts",
-    "start": "node --experimental-sqlite --disable-warning=ExperimentalWarning --import tsx src/index.ts",
+    "dev": "node --disable-warning=ExperimentalWarning --watch --import tsx src/index.ts",
+    "start": "node --disable-warning=ExperimentalWarning --import tsx src/index.ts",
     "typecheck": "tsc --noEmit -p .",
-    "test": "node --experimental-sqlite --disable-warning=ExperimentalWarning --import tsx --test test/*.test.ts",
+    "test": "node --disable-warning=ExperimentalWarning --import tsx --test test/*.test.ts",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix"
   },
@@ -28,7 +28,7 @@
     "typescript-eslint": "^8.72.1"
   },
   "engines": {
-    "node": ">=22.13"
+    "node": ">=24.11"
   },
   "license": "ISC"
 }

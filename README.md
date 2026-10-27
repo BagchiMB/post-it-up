@@ -21,8 +21,8 @@ for app- and server-specific details.
 
 ## Requirements
 
-- **Node ≥ 23** and npm 10 (one root `package-lock.json`). On Node 23.0 `node:sqlite` needs
-  `--experimental-sqlite`; the server's npm scripts pass it.
+- **Node 24** (pinned in `.nvmrc` — run `nvm use` in the repo root; `nvm install` if you don't have it) and
+  npm 10+ (one root `package-lock.json`). The server uses Node's built-in `node:sqlite`.
 - Xcode for iOS builds.
 
 ## Setup
