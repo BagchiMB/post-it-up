@@ -1,5 +1,6 @@
 import { type DraftRequest, MAX_UPLOAD_PHOTOS } from '@postitup/shared';
 
+import { deleteTempFiles } from '@/lib/temp-files';
 import { createJob, formatRange, fromDay } from '@/state/jobs';
 
 import { findCandidates, thumbnail } from './photos';
@@ -26,16 +27,29 @@ export async function uploadJob(request: DraftRequest, onStep: (step: UploadStep
   if (candidates.length === 0)
     throw new NoPhotosError(`No photos found for ${formatRange(request)}.`);
 
-  const images: string[] = [];
-  for (let i = 0; i < candidates.length; i += PARALLEL) {
-    images.push(...(await Promise.all(candidates.slice(i, i + PARALLEL).map(thumbnail))));
-  }
+  // Thumbnails are also written to temporary files; delete them however the upload ends.
+  const files: string[] = [];
+  try {
+    const images: string[] = [];
+    for (let i = 0; i < candidates.length; i += PARALLEL) {
+      const batch = await Promise.allSettled(candidates.slice(i, i + PARALLEL).map(thumbnail));
+      for (const r of batch) {
+        if (r.status !== 'fulfilled') continue;
+        if (r.value.uri) files.push(r.value.uri);
+        images.push(r.value.base64);
+      }
+      const failed = batch.find((r) => r.status === 'rejected');
+      if (failed) throw failed.reason;
+    }
 
-  onStep('uploading');
-  const job = await createJob({
-    request,
-    candidates: candidates.map((c) => ({ id: c.id, takenAt: c.takenAt })),
-    images,
-  });
-  return job.id;
+    onStep('uploading');
+    const job = await createJob({
+      request,
+      candidates: candidates.map((c) => ({ id: c.id, takenAt: c.takenAt })),
+      images,
+    });
+    return job.id;
+  } finally {
+    deleteTempFiles(files);
+  }
 }

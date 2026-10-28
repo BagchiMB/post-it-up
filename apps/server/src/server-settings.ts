@@ -31,6 +31,8 @@ export type ServerSettings = {
   spotifyOwnerUserId: string | null;
   /** Below this fit score (0–100) a restricted-source song also gets an `alternative`. */
   lowFitThreshold: number;
+  /** Balance (USD) below which admins see a low-balance warning. */
+  lowBalanceUsd: number;
 };
 
 const KEY_CONTEXT = 'server:openrouter';
@@ -77,6 +79,7 @@ function load() {
       spotifyUserCap: map.get('spotifyUserCap') as number,
       spotifyOwnerUserId: (map.get('spotifyOwnerUserId') as string | null | undefined) ?? null,
       lowFitThreshold: map.get('lowFitThreshold') as number,
+      lowBalanceUsd: map.get('lowBalanceUsd') as number,
     },
     openRouterKey,
     spotifyClientId: typeof clientId === 'string' && clientId ? clientId : null,
@@ -110,6 +113,7 @@ export function seedServerSettings() {
   putIfMissing('spotifyUserCap', 5);
   putIfMissing('lowFitThreshold', DEFAULT_LOW_FIT_THRESHOLD);
   putIfMissing('stepModels', {});
+  putIfMissing('lowBalanceUsd', 2);
   if (config.openRouterKey) {
     const res = putIfMissing('openRouterKey', encrypt(config.openRouterKey, KEY_CONTEXT));
     if (Number(res.changes) > 0) log('OpenRouter key seeded from OPENROUTER_API_KEY');

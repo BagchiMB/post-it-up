@@ -85,12 +85,43 @@ export function usageBreakdown(days: number) {
      WHERE created_at >= ? GROUP BY prompt_key ORDER BY cost DESC`,
     since,
   );
+  // Posted rate for the model that made the posts (final_post): posted posts ÷ posts.
+  const postedByModel = new Map(
+    all<{ model: string; posts: number; posted: number }>(
+      `SELECT a.model AS model, COUNT(p.value) AS posts,
+              SUM(CASE WHEN json_extract(p.value, '$.postedAt') IS NOT NULL THEN 1 ELSE 0 END) AS posted
+       FROM (SELECT DISTINCT job_id, model FROM ai_calls
+             WHERE prompt_key = 'final_post' AND job_id IS NOT NULL AND created_at >= ?) a
+       JOIN jobs j ON j.id = a.job_id AND j.status = 'ready'
+       JOIN json_each(j.result, '$.posts') p
+       GROUP BY a.model`,
+      since,
+    ).map((r) => [r.model, r]),
+  );
   const byModel = all<{ model: string; routedModel: string | null; cost: number; calls: number }>(
     `SELECT model, routed_model AS routedModel, SUM(cost_usd) AS cost, COUNT(*) AS calls FROM ai_calls
      WHERE created_at >= ? GROUP BY model, routed_model ORDER BY cost DESC`,
     since,
-  );
+  ).map((r) => {
+    const p = postedByModel.get(r.model);
+    return {
+      ...r,
+      posts: p?.posts ?? 0,
+      posted: p?.posted ?? 0,
+      postedRate: p && p.posts > 0 ? Math.round((p.posted / p.posts) * 1000) / 1000 : null,
+    };
+  });
   return { byDay, byUser, byStep, byModel };
+}
+
+/** Posts marked as posted, per user (for the Users page). */
+export function postedByUser(): Map<string, number> {
+  return new Map(
+    all<{ user_id: string; n: number }>(
+      `SELECT j.user_id, COUNT(*) AS n FROM jobs j, json_each(j.result, '$.posts') p
+       WHERE j.status = 'ready' AND json_extract(p.value, '$.postedAt') IS NOT NULL GROUP BY j.user_id`,
+    ).map((r) => [r.user_id, r.n]),
+  );
 }
 
 /** All-time spend per user (for the Users page). */

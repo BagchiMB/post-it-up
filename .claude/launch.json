@@ -27,6 +27,15 @@
         "source ~/.nvm/nvm.sh && nvm use --silent 24 && npm run dev -w apps/server"
       ],
       "port": 8787
+    },
+    {
+      "name": "admin",
+      "runtimeExecutable": "bash",
+      "runtimeArgs": [
+        "-lc",
+        "source ~/.nvm/nvm.sh && nvm use --silent 24 && npm run dev -w apps/admin"
+      ],
+      "port": 5173
     }
   ]
 }

@@ -1,6 +1,8 @@
 import { ImageManipulator, SaveFormat } from 'expo-image-manipulator';
 import { Asset, AssetField, MediaSubtype, MediaType, Query } from 'expo-media-library';
 
+import { deleteTempFiles } from '@/lib/temp-files';
+
 export type Candidate = {
   id: string;
   takenAt: number;
@@ -55,12 +57,18 @@ export function displayUri(id: string) {
   return new Asset(id).getUri();
 }
 
-/** A small JPEG (longest side 512px) as raw base64, for upload to the server. */
-export async function thumbnail(c: Candidate): Promise<string> {
+/**
+ * A small JPEG (longest side 512px) as raw base64, for upload to the server. `uri` is the
+ * temporary file it was saved to; the caller deletes it once the upload is done.
+ */
+export async function thumbnail(c: Candidate): Promise<{ base64: string; uri: string }> {
   const uri = await displayUri(c.id);
   const size = c.width >= c.height ? { width: 512 } : { height: 512 };
   const image = await ImageManipulator.manipulate(uri).resize(size).renderAsync();
   const result = await image.saveAsync({ format: SaveFormat.JPEG, compress: 0.6, base64: true });
-  if (!result.base64) throw new Error('Couldn’t read a photo.');
-  return result.base64;
+  if (!result.base64) {
+    deleteTempFiles([result.uri]);
+    throw new Error('Couldn’t read a photo.');
+  }
+  return { base64: result.base64, uri: result.uri };
 }

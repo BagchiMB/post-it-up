@@ -444,13 +444,17 @@ export function listPrompts() {
 export function listVersions(key: PromptKey) {
   const activeVersion = activePrompt(key).version;
   const path = `$.${key}`;
-  return all<VersionRow & { jobs: number; failed: number }>(
+  return all<VersionRow & { jobs: number; failed: number; posted: number }>(
     `SELECT v.version, v.body, v.note, v.created_at,
             (SELECT COUNT(*) FROM jobs j WHERE json_extract(j.prompt_versions, ?) = v.version
                AND j.status IN ('ready', 'failed')) AS jobs,
             (SELECT COUNT(*) FROM jobs j WHERE json_extract(j.prompt_versions, ?) = v.version
-               AND j.status = 'failed') AS failed
+               AND j.status = 'failed') AS failed,
+            (SELECT COUNT(*) FROM jobs j, json_each(j.result, '$.posts') p
+               WHERE json_extract(j.prompt_versions, ?) = v.version AND j.status = 'ready'
+                 AND json_extract(p.value, '$.postedAt') IS NOT NULL) AS posted
      FROM prompt_versions v WHERE v.key = ? ORDER BY v.version DESC`,
+    path,
     path,
     path,
     key,
@@ -459,6 +463,7 @@ export function listVersions(key: PromptKey) {
     active: r.version === activeVersion,
     jobs: r.jobs,
     failed: r.failed,
+    posted: r.posted,
   }));
 }
 

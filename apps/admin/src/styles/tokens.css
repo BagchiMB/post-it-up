@@ -1,0 +1,55 @@
+/* Design tokens: indigo accent, light + dark (follows the OS setting). Ported from the server-rendered admin. */
+:root {
+  --bg: #f6f7fb;
+  --surface: #ffffff;
+  --surface-2: #f1f3f9;
+  --border: #e4e7ef;
+  --text: #0f172a;
+  --muted: #5b6a80;
+  --accent: #4f46e5;
+  --accent-hover: #4338ca;
+  --accent-soft: #eef0ff;
+  --on-accent: #ffffff;
+  --success: #047857;
+  --success-icon: #059669;
+  --success-soft: #e7f7f1;
+  --warning: #b45309;
+  --warning-icon: #d97706;
+  --warning-soft: #fef5e7;
+  --danger: #be123c;
+  --danger-icon: #e11d48;
+  --danger-soft: #fdecf0;
+  --shadow: 0 1px 2px rgba(15, 23, 42, 0.04), 0 4px 16px rgba(15, 23, 42, 0.04);
+  --overlay: rgba(15, 23, 42, 0.45);
+  --radius: 14px;
+  --radius-sm: 10px;
+  --font:
+    -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  color-scheme: light dark;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0b0d14;
+    --surface: #12151f;
+    --surface-2: #181c28;
+    --border: #262b3a;
+    --text: #e7e9f2;
+    --muted: #8a93a8;
+    --accent: #818cf8;
+    --accent-hover: #a5b4fc;
+    --accent-soft: rgba(129, 140, 248, 0.14);
+    --on-accent: #0b0d14;
+    --success: #34d399;
+    --success-icon: #34d399;
+    --success-soft: rgba(52, 211, 153, 0.14);
+    --warning: #fbbf24;
+    --warning-icon: #fbbf24;
+    --warning-soft: rgba(251, 191, 36, 0.14);
+    --danger: #fb7185;
+    --danger-icon: #fb7185;
+    --danger-soft: rgba(251, 113, 133, 0.14);
+    --shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 4px 16px rgba(0, 0, 0, 0.2);
+  }
+}

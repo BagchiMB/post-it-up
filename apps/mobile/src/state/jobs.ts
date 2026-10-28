@@ -105,6 +105,15 @@ export async function applyAlternative(id: string, postIndex: number) {
   return job;
 }
 
+/** The user posted it on Instagram (or undoes that). */
+export async function markPosted(id: string, postIndex: number, posted: boolean) {
+  const job = await api<Job>('POST', `/jobs/${encodeURIComponent(id)}/posts/${postIndex}/posted`, {
+    body: { posted },
+  });
+  upsert(job);
+  return job;
+}
+
 export async function deleteJob(id: string) {
   await api('DELETE', `/jobs/${encodeURIComponent(id)}`);
   removeLocal(id);

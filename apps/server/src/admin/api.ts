@@ -1,11 +1,29 @@
+import path from 'node:path';
+
+import type { AdminIntegrations, AdminOverview, AdminStatus } from '@postitup/shared';
 import { type Context, Hono } from 'hono';
 
-import { all } from '../db.ts';
+import { config } from '../config.ts';
+import { all, db } from '../db.ts';
 import { ApiError, readJson } from '../http.ts';
 import { log } from '../log.ts';
+import { listBackups, MIGRATIONS, schemaVersion } from '../migrations.ts';
 import { notifyUser } from '../ntfy.ts';
-import { allModels, checkKey, credits, type ModelChoice, visionModels } from '../openrouter.ts';
-import { type LogFilter, parseTime, queryLogs } from '../outbound.ts';
+import {
+  allModels,
+  balanceStatus,
+  checkKey,
+  credits,
+  type ModelChoice,
+  visionModels,
+} from '../openrouter.ts';
+import {
+  failuresSince,
+  type LogFilter,
+  outOfCreditsState,
+  parseTime,
+  queryLogs,
+} from '../outbound.ts';
 import {
   activateVersion,
   createVersion,
@@ -29,17 +47,19 @@ import {
   updateServerSettings,
 } from '../server-settings.ts';
 import { appConfigured, requestAppToken, resetAppToken, SpotifyHttpError } from '../spotify.ts';
-import { spendByUser, usageBreakdown } from '../usage.ts';
+import { postedByUser, spendByUser, spendToday, usageBreakdown } from '../usage.ts';
 import {
   clearSpotify,
   getNtfyTopic,
   getSpotifyAccess,
   setSpotifyAccess,
+  spotifyConnectedCount,
   spotifySlotsUsed,
   type StoredSpotifyAccess,
 } from '../users.ts';
 import { changePassword, endOtherSessions, getAccount, verifyPassword } from './account.ts';
-import { CHECKS, runChecks } from './checks.ts';
+import { CHECKS, lastRun, runChecks } from './checks.ts';
+import { dbFileSize } from './db-browser.ts';
 
 /** JSON API under /admin/api (cookie auth + JSON content type are enforced by the caller). */
 export const adminApi = new Hono<{ Variables: { adminSession: string } }>();
@@ -146,6 +166,13 @@ adminApi.put('/settings', async (c) => {
     }
     patch.clipLengths = [...new Set(v as number[])].sort((a, b) => a - b);
   }
+  if (body.lowBalanceUsd !== undefined) {
+    const n = body.lowBalanceUsd;
+    if (typeof n !== 'number' || !Number.isFinite(n) || n < 0 || n > 1000) {
+      throw new ApiError(400, 'Low-balance warning must be a number of dollars from 0 to 1000.');
+    }
+    patch.lowBalanceUsd = Math.round(n * 100) / 100;
+  }
   if (body.lowFitThreshold !== undefined) {
     if (!intIn(body.lowFitThreshold, 0, 100))
       throw new ApiError(400, 'Low-fit threshold must be a whole number from 0 to 100.');
@@ -223,16 +250,18 @@ export function stepModelsView() {
 
 // Integrations -------------------------------------------------------------------
 
-function integrationsView() {
+function integrationsView(): AdminIntegrations {
   const key = openRouterKey();
   const id = spotifyClientId();
   const secret = spotifyClientSecret();
+  const balance = balanceStatus(key, serverSettings().lowBalanceUsd);
   return {
-    openrouter: key ? { set: true, hint: keyHint(key) } : { set: false },
+    openrouter: key ? { set: true, hint: keyHint(key), balance } : { set: false, balance },
     spotify: {
       ...(id ? { clientId: id } : {}),
       secretSet: !!secret,
       ...(secret ? { secretHint: secretHint(secret) } : {}),
+      ...(config.appBundleId ? { appBundleId: config.appBundleId } : {}),
     },
   };
 }
@@ -464,6 +493,7 @@ adminApi.post('/spotify-access/:userId/revoke', (c) => {
 export function usersList() {
   const today = new Date().toISOString().slice(0, 10);
   const spend = spendByUser();
+  const posted = postedByUser();
   return all<{
     id: string;
     email: string;
@@ -487,6 +517,7 @@ export function usersList() {
     spotify: !!r.spotify,
     postsToday: r.today ?? 0,
     postsTotal: r.total,
+    posted: posted.get(r.id) ?? 0,
     spendUsd: spend.get(r.id) ?? 0,
   }));
 }
@@ -563,4 +594,76 @@ adminApi.post('/account/password', async (c) => {
   endOtherSessions(c.get('adminSession'));
   log('admin password changed; other admin sessions signed out');
   return c.json({ ok: true });
+});
+
+// Overview, status, checks, prompt detail (everything the admin UI shows) -------------------------
+
+const STARTED = Date.now();
+
+/** GET /admin/api/overview: the dashboard tiles and status summary. */
+adminApi.get('/overview', async (c) => {
+  const key = openRouterKey();
+  const cr = key
+    ? await credits(key).catch((e: Error) => ({ error: e.message }))
+    : { error: 'No OpenRouter key is set.' };
+  const today = spendToday();
+  const day = new Date().toISOString().slice(0, 10);
+  const since = Date.now() - 86_400_000;
+  const s = serverSettings();
+  return c.json<AdminOverview>({
+    credits: 'error' in cr ? null : cr,
+    creditsError: 'error' in cr ? cr.error : null,
+    spendToday: { costUsd: today.cost, calls: today.calls },
+    tasksToday: all<{ n: number }>(
+      'SELECT COALESCE(SUM(count), 0) AS n FROM job_usage WHERE day = ?',
+      day,
+    )[0].n,
+    failedCalls24h: { count: failuresSince(since), since },
+    status: { openRouterKey: !!key, spotifyApp: appConfigured() },
+    balance: balanceStatus(key, s.lowBalanceUsd),
+    /** Set while OpenRouter chat calls fail for lack of credits ("AI calls failing: out of credits"). */
+    aiOutOfCredits: outOfCreditsState(),
+    model: s.model,
+    spotify: {
+      connected: spotifyConnectedCount(),
+      slotsUsed: spotifySlotsUsed(),
+      cap: s.spotifyUserCap,
+      pendingRequests: pendingSpotifyRequests(),
+    },
+    lastChecks: lastRun,
+  });
+});
+
+/** GET /admin/api/status: server, database and the last check results (checks run via POST /checks/run). */
+adminApi.get('/status', (c) => {
+  const backups = listBackups(config.dataDir);
+  return c.json<AdminStatus>({
+    server: {
+      version: config.version,
+      node: process.version,
+      uptimeSec: Math.round((Date.now() - STARTED) / 1000),
+    },
+    database: {
+      schemaVersion: schemaVersion(db),
+      expectedVersion: MIGRATIONS.length,
+      fileSize: dbFileSize(),
+      backups: backups.length,
+      lastBackupAt: backups[0]?.at ?? null,
+      backupsDir: path.join(config.dataDir, 'backups'),
+    },
+    checks: CHECKS.map(({ id, label }) => ({ id, label })),
+    lastRun,
+  });
+});
+
+/** GET /admin/api/prompts/:key: one prompt with its placeholders, active version and effective model. */
+adminApi.get('/prompts/:key', (c) => {
+  const key = promptKey(c);
+  const def = listPrompts().find((p) => p.key === key)!;
+  const s = serverSettings();
+  const model = s.stepModels[key] ?? s.model;
+  return c.json({
+    ...def,
+    model: { id: model.id, name: model.name, isDefault: !s.stepModels[key] },
+  });
 });

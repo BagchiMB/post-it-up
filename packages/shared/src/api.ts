@@ -143,6 +143,8 @@ export type PostResult = {
   /** While a "Change the music" request runs / if it failed. */
   musicStatus?: 'changing' | 'failed';
   musicError?: string;
+  /** ms epoch; set when the user marks the post as published on Instagram. */
+  postedAt?: number;
 };
 
 export type JobResult = {

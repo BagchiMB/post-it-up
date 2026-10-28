@@ -2,7 +2,7 @@
   "name": "post-it-up",
   "version": "1.0.0",
   "private": true,
-  "description": "Post It Up: Expo app + Node server (npm workspaces)",
+  "description": "Post It Up: Expo app + Node server + React admin (npm workspaces)",
   "workspaces": [
     "apps/*",
     "packages/*"
@@ -10,6 +10,8 @@
   "scripts": {
     "dev:mobile": "npm run start -w apps/mobile",
     "dev:server": "npm run dev -w apps/server",
+    "dev:admin": "npm run dev -w apps/admin",
+    "build:admin": "npm run build -w apps/admin",
     "ios": "npm run ios -w apps/mobile",
     "lint": "npm run lint --workspaces --if-present",
     "lint:fix": "npm run lint:fix --workspaces --if-present",

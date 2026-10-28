@@ -9,7 +9,7 @@ import { useDisplayUris } from '@/curation/use-display-uris';
 import { errorMessage } from '@/lib/api';
 import { trackUrl } from '@/lib/spotify';
 import { useLowFitThreshold } from '@/state/app-config';
-import { applyAlternative, changeMusic } from '@/state/jobs';
+import { applyAlternative, changeMusic, markPosted } from '@/state/jobs';
 import { Avatar, Button, Caption, Field, radius, space, type, useColors } from '@/ui';
 
 import { SongPlayer, useCanPlayInApp } from './song-player';
@@ -89,6 +89,7 @@ export function PostCard({
           setCopied(true);
         }}
       />
+      <PostedControl jobId={jobId} index={index} postedAt={post.postedAt} />
 
       <View style={[styles.note, { backgroundColor: c.surface }]}>
         <Caption muted>{post.reason}</Caption>
@@ -104,6 +105,56 @@ export function PostCard({
       ) : null}
 
       <ChangeMusic jobId={jobId} index={index} post={post} />
+    </View>
+  );
+}
+
+/** "Mark as posted" ↔ "✓ Posted · Oct 27" with Undo (the app can't see Instagram). */
+function PostedControl({
+  jobId,
+  index,
+  postedAt,
+}: {
+  jobId: string;
+  index: number;
+  postedAt?: number;
+}) {
+  const c = useColors();
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string>();
+
+  async function set(posted: boolean) {
+    setBusy(true);
+    setError(undefined);
+    try {
+      await markPosted(jobId, index, posted);
+    } catch (e) {
+      setError(errorMessage(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <View style={{ gap: space.xs }}>
+      {postedAt ? (
+        <View style={[styles.inline, { justifyContent: 'center' }]}>
+          <Text style={[type.label, { color: c.text }]}>
+            ✓ Posted ·{' '}
+            {new Date(postedAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
+          </Text>
+          <Pressable
+            accessibilityRole="button"
+            hitSlop={8}
+            disabled={busy}
+            onPress={() => void set(false)}>
+            <Text style={[type.caption, { color: c.textMuted }]}>Undo</Text>
+          </Pressable>
+        </View>
+      ) : (
+        <Button title="Mark as posted" onPress={() => void set(true)} loading={busy} />
+      )}
+      {error ? <Caption style={{ color: c.danger, textAlign: 'center' }}>{error}</Caption> : null}
     </View>
   );
 }

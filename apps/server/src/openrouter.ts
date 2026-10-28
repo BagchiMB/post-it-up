@@ -1,4 +1,4 @@
-import { linkCost, outbound } from './outbound.ts';
+import { linkCost, markOutcome, outbound } from './outbound.ts';
 import { type OpenRouterUsage, recordAiCall } from './usage.ts';
 
 const BASE = 'https://openrouter.ai/api/v1';
@@ -157,6 +157,47 @@ export type Credits = {
 };
 
 let creditsCache: { at: number; key: string; value: Credits } | null = null;
+
+/** The OpenRouter account ran out of credits. Users see a generic message; admins see the details. */
+export class OutOfCreditsError extends Error {
+  readonly userMessage = 'The AI service is temporarily unavailable. Try again later.';
+}
+
+/** Drops the cached balance and re-reads it in the background (after an out-of-credits failure). */
+function refreshCreditsSoon(key: string) {
+  creditsCache = null;
+  void credits(key).catch(() => undefined);
+}
+
+/** The last credits lookup and when it was made (no network). */
+export const cachedCredits = () =>
+  creditsCache ? { value: creditsCache.value, at: creditsCache.at } : null;
+
+export type BalanceStatus = {
+  status: 'ok' | 'low' | 'empty' | 'unknown';
+  balanceUsd?: number;
+  keyLimitUsd?: number | null;
+  isFreeTier?: boolean;
+  checkedAt: number | null;
+};
+
+/** Account balance (never the key's limit) vs the low-balance threshold, from the cached lookup. */
+export function balanceStatus(key: string | null, lowBalanceUsd: number): BalanceStatus {
+  const cached = creditsCache && creditsCache.key === key ? creditsCache : null;
+  // Keep the cache warm for banners without making callers wait.
+  if (key && (!cached || Date.now() - cached.at > 60_000)) void credits(key).catch(() => undefined);
+  if (!cached) return { status: 'unknown', checkedAt: null };
+  const c = cached.value;
+  const extra = {
+    ...(c.key ? { keyLimitUsd: c.key.limit, isFreeTier: c.key.isFreeTier } : {}),
+    checkedAt: cached.at,
+  };
+  if (c.source !== 'credits' || typeof c.balance !== 'number')
+    return { status: 'unknown', ...extra };
+  const balanceUsd = Math.round(c.balance * 100) / 100;
+  const status = c.balance <= 0 ? 'empty' : c.balance < lowBalanceUsd ? 'low' : 'ok';
+  return { status, balanceUsd, ...extra };
+}
 /** Keys whose /credits call failed (e.g. 403): retry after 10 minutes rather than on every page view. */
 const creditsFailedUntil = new Map<string, number>();
 
@@ -325,7 +366,7 @@ export async function chatJson<T>(opts: {
   }
 
   type Body = {
-    error?: { message?: string };
+    error?: { message?: string; code?: number };
     choices?: { message?: { content?: string | null } }[];
     model?: string;
     usage?: OpenRouterUsage;
@@ -343,7 +384,14 @@ export async function chatJson<T>(opts: {
     );
   }
   if (!res.ok || body?.error) {
-    throw new Error(body?.error?.message ?? `OpenRouter returned ${res.status}`);
+    const message = body?.error?.message ?? `OpenRouter returned ${res.status}`;
+    // Insufficient credits: HTTP 402 (error.code mirrors the status), or a body that says so.
+    if (res.status === 402 || body?.error?.code === 402 || /insufficient credits/i.test(message)) {
+      markOutcome(res, 'out_of_credits');
+      refreshCreditsSoon(opts.apiKey);
+      throw new OutOfCreditsError(message);
+    }
+    throw new Error(message);
   }
 
   const text = body?.choices?.[0]?.message?.content ?? '';

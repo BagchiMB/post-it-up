@@ -51,27 +51,21 @@ An `apps/server/.env` file is loaded automatically if present.
 
 ## Admin site
 
-Open `http://localhost:8787/admin` (or `https://<your-domain>/admin` on EC2) and sign in with the
-admin account (seeded from `ADMIN_USERNAME` / `ADMIN_PASSWORD`; sign-in is rate-limited per IP).
-Server-rendered pages sharing one layout; to add a section, add an entry to `PAGES` in
-`src/admin/pages.ts`.
+The admin UI is a React app in `apps/admin`; this server provides its JSON API (`/admin/api/*`,
+documented in `docs/api-contract.md` → "Admin API (complete)") and serves the built app.
 
-- **Overview**: credits left, today's spend and tasks, failed integration calls (24 h), Spotify connections, status.
-- **AI usage**: OpenRouter credits (account credits need a management key; otherwise this key's usage
-  is shown and labelled), spend per day (30 days), per user, per AI step, per model — from `ai_calls`,
-  recorded from OpenRouter's `usage` on every call.
-- **AI settings**: model (image-capable OpenRouter models with prices), allowed song clip lengths.
-- **Prompts**: the five model instructions, versioned (edit → new active version; history with
-  posts/failed counts, diff against active, "Make active").
-- **Limits**: tasks/day, music changes/day, log retention, Spotify connection cap.
-- **Integrations**: OpenRouter key and Spotify client ID/secret (encrypted, masked; Replace validates, Test runs checks).
-- **Users** (incl. spend; disconnect someone's Spotify to free a slot), **Logs** (every outgoing call:
-  filters in the URL, 50 per page, row detail), **Status** (on-demand checks: OpenRouter key/model,
-  Spotify app/search, LRCLIB, ntfy to a throwaway topic, Google keys; version/uptime), **Account**
-  (last sign-ins, change password — signs out other admin sessions).
-
-Settings, prompts and credentials live in the DB, so changes apply immediately. The session cookie
-is `HttpOnly; SameSite=Strict; Path=/admin` (12 h; `Secure` over HTTPS); API writes require JSON.
+- **Production / normal use:** `npm run build:admin` (from the repo root) builds `apps/admin/dist`;
+  the server then serves it at `http://localhost:8787/admin` (or `https://<your-domain>/admin` on
+  EC2). Hashed assets are cached for a year, `index.html` never; every non-API `/admin/*` path gets
+  the app (client-side routing). Without a build, `/admin/*` answers `503 Admin UI not built — run
+npm run build:admin` (the API still works). `ADMIN_DIST` points elsewhere if needed.
+- **Developing the admin:** `npm run dev:admin` runs Vite with live reload on
+  `http://localhost:5173/admin/`, proxying `/admin/api`, `/admin/login` and `/admin/logout` to this
+  server (keep `npm run dev:server` running).
+- **Sign-in:** the admin account is seeded from `ADMIN_USERNAME` / `ADMIN_PASSWORD` (see
+  Environment); sign-in is rate-limited per IP. The session cookie is
+  `HttpOnly; SameSite=Strict; Path=/admin` (12 h; `Secure` over HTTPS); API writes require JSON.
+- Settings, prompts and credentials live in the DB, so changes apply immediately.
 
 ## Reaching it from a physical iPhone
 
@@ -111,9 +105,94 @@ The Simulator and web preview use `http://localhost:8787`. A real phone must use
   and images are never logged.
 - `/auth/*` is limited to 20 requests per minute per IP (`429` beyond that).
 
+## Database & migrations
+
+### Where the data lives
+
+All app data lives **only on the machine that runs this server**, in one folder: `DATA_DIR`
+(set in `apps/server/.env`; a relative path is resolved from `apps/server/`, so the default `./data`
+is `<repo>/apps/server/data/` — on EC2 e.g. `/opt/postitup/apps/server/data/`).
+It is git-ignored, so **GitHub never has a copy**, and the iPhone app only keeps small caches of
+what the server sends it (plus the sign-in token), which it refetches.
+
+The database is SQLite — a single file inside that folder, opened by the server process (there is
+no separate database service):
+
+| File                       | What it is                                                                    |
+| -------------------------- | ----------------------------------------------------------------------------- |
+| `app.db`                   | The database: users, sessions, tasks/posts, settings, prompts, usage, logs    |
+| `app.db-wal`, `app.db-shm` | SQLite's write-ahead log and its index (folded into `app.db` automatically)   |
+| `master.key`               | Encrypts the secrets stored in the DB (OpenRouter key, Spotify secret/tokens) |
+| `backups/`                 | Automatic pre-migration backups and `db:backup` copies                        |
+| `jobs/`                    | Uploaded photo thumbnails, deleted once a task is posted or after 7 days      |
+
+- **Stopping, restarting or crashing the server doesn't lose data.** Every change is written to
+  disk as it happens; on the next start the server opens the same file. After a crash or power cut
+  SQLite completes or discards the in-flight change, so the file stays consistent.
+- **What does lose data:** deleting `DATA_DIR`, losing the disk, or losing `master.key` (the rest
+  survives, but stored secrets can't be decrypted — re-enter them on the admin Integrations page).
+
+### Moving the data (new machine, EC2, or a new folder)
+
+`app.db` and `master.key` **always travel together**; `backups/` is worth bringing too. `jobs/` is
+optional (only in-progress uploads; tasks that need them can be re-run).
+
+1. **Stop the server** on the old machine (so nothing is mid-write), then copy the whole `DATA_DIR`:
+
+   ```sh
+   # from the old machine — e.g. to an EC2 instance
+   rsync -a --chmod=D700,F600 "apps/server/data/" ubuntu@<ec2-host>:/opt/postitup/apps/server/data/
+   ```
+
+   Copy `apps/server/.env` the same way (it isn't in git either), then adjust it for the new machine
+   (`HOST`, `TRUST_PROXY`, no `DEV_LOGIN`, a strong admin password).
+
+2. **Can't stop the server?** Take a consistent snapshot instead and move that as `app.db`:
+   `npm run db:backup -w apps/server`, then copy the newest `backups/app-…-manual.db` to the new
+   machine's `DATA_DIR/app.db`, plus `master.key`. Changes made after the snapshot aren't included.
+
+3. **Start the server** on the new machine with the same code version or newer. Pending migrations
+   run automatically (after taking a backup); an older code version refuses to open a newer database.
+   Check the admin **Status** page: schema version, database size and your users should all be there.
+
+4. Point the app at the new server (`EXPO_PUBLIC_API_URL`). Sessions are stored in the database, so
+   users stay signed in once the app talks to the new server.
+
+If you set `MASTER_KEY` in `.env` instead of using `master.key`, move that value instead of the file.
+
+### Migrations
+
+The schema lives in `src/migrations.ts` as an **append-only** list of SQL migrations, tracked by
+`PRAGMA user_version`. Each runs once, in its own transaction, at boot.
+
+- **Never edit, reorder or delete a shipped migration.** To change the schema, append a new entry
+  (and add its SHA-256 to `FINGERPRINTS` in `test/migrations.test.ts`; that test fails if an old
+  migration changes). The test also upgrades a database from every earlier version with sample
+  data and checks that it survives.
+- **Prefer additive changes**: new tables, new nullable columns, new indexes.
+- **Renaming or dropping a column safely**: add the new column → copy the data in the same
+  migration → change the code to read/write only the new column → drop the old one only in a later
+  release, once nothing reads it.
+- **JSON columns** (`jobs.request`, `jobs.result`, `users.settings`, …) are upgraded on read
+  (e.g. old single-post jobs read back as `posts[0]`), so their shape can change without a migration.
+- **Backups**: before migrating an existing database the server copies it with SQLite's
+  `VACUUM INTO` (consistent while running) to `DATA_DIR/backups/app-<UTC stamp>-v<from>-to-v<to>.db`
+  and keeps the newest 10. If that backup fails, the server refuses to migrate and exits.
+  On-demand backup: `npm run db:backup -w apps/server` (`…-manual.db`, safe while the server runs).
+- **Downgrade guard**: a database from a newer server version (higher `user_version` than this code
+  knows) is refused at boot — deploy the newer code or restore a backup.
+- **Restore a backup**: stop the server, copy the backup over `DATA_DIR/app.db` (and delete
+  `app.db-wal` / `app.db-shm` if present), start the server. Newer migrations re-run on boot.
+- **Permissions**: on boot `DATA_DIR` and `backups/` are set to 0700 and `app.db`, its `-wal`/`-shm`
+  files, `master.key` and every backup to 0600 (owner-only); the log says so once if it had to change
+  anything. Back up `master.key` together with the database — without it, stored secrets can't be
+  decrypted.
+- The admin **Status** page shows the schema version, database size and the latest backup.
+
 ## Moving to EC2
 
-- Use Node 22.13+ or 24 (there `node:sqlite` needs no flag; the flag in the scripts is still accepted).
+- Use Node 24 (the version in the root `.nvmrc`; e.g. `nvm install` in the repo root). `node:sqlite` is
+  built in, no flags needed.
 - Copy the repo (the server imports `packages/shared`), run `npm ci -w apps/server` at the root, create
   `apps/server/.env` (mode 0600) with `HOST=127.0.0.1`, `TRUST_PROXY=1`,
   `GOOGLE_CLIENT_IDS`, the seeds (`OPENROUTER_API_KEY`, `SPOTIFY_CLIENT_ID`, `SPOTIFY_CLIENT_SECRET`,

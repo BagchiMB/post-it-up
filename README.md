@@ -10,7 +10,8 @@ npm-workspaces monorepo:
 
 ```
 apps/mobile/       Expo SDK 58 app (Expo Router, TypeScript) + local module modules/spotify-remote
-apps/server/       Node + Hono + node:sqlite API server and admin site (tests in test/)
+apps/server/       Node + Hono + node:sqlite API server; serves the admin site (tests in test/)
+apps/admin/        React admin site (Vite + React Router + TanStack Query/Table), built into apps/admin/dist
 packages/shared/   @postitup/shared — API types and constants used by both apps (TS source, no build)
 packages/config/   @postitup/config — shared ESLint base, Prettier config, tsconfig bases
 docs/              api-contract.md: the app ⇄ server API (types mirror packages/shared)
@@ -61,12 +62,40 @@ for app- and server-specific details.
    sh apps/mobile/modules/spotify-remote/scripts/fetch-sdk.sh
    ```
 
+## Your data
+
+All app data lives on the server in one SQLite file, `apps/server/data/app.db` (git-ignored), next to
+`master.key`, which encrypts the stored secrets. It persists when the server stops or restarts, and
+the server backs it up automatically before every schema upgrade. Keep `app.db` and `master.key`
+together, and run `npm run db:backup -w apps/server` before moving or deleting the project. Details —
+where exactly it lives, how to move it to another machine, backups, restoring and migrations:
+[apps/server/README.md → Database & migrations](apps/server/README.md#database--migrations).
+
+## Admin site
+
+The admin site (`apps/admin`) is a React app: Vite, React 19, React Router (data mode, basename
+`/admin`), TanStack Query for server data and TanStack Table for the tables, with plain CSS
+(`src/styles/tokens.css` + `components.css`, indigo light/dark). It talks only to the server's JSON
+API under `/admin/api/*` (types from `@postitup/shared`, see
+[docs/api-contract.md → Admin API (complete)](docs/api-contract.md#admin-api-complete)); sign-in is
+the server's `HttpOnly` cookie.
+
+- **Develop:** run the server (`npm run dev:server`) and `npm run dev:admin`, then open
+  http://localhost:5173/admin/. Vite proxies `/admin/api`, `POST /admin/login` and `/admin/logout` to
+  http://localhost:8787 (override with `ADMIN_API_URL`), so the cookie works as on the real site and
+  edits hot-reload.
+- **Build / serve:** `npm run build:admin` writes `apps/admin/dist`; the server then serves it at
+  http://localhost:8787/admin (any unknown `/admin/*` path falls back to `index.html`). Rebuild after
+  admin changes; until a build exists the server falls back to its older server-rendered pages.
+
 ## Scripts (run from the root)
 
 | Script                                    | What it does                                               |
 | ----------------------------------------- | ---------------------------------------------------------- |
 | `npm run dev:server`                      | Server with watch mode (`apps/server`, port 8787)          |
 | `npm run dev:mobile`                      | Metro / Expo dev server (`apps/mobile`)                    |
+| `npm run dev:admin`                       | Admin site dev server (Vite, port 5173, `/admin/`)         |
+| `npm run build:admin`                     | Build the admin site into `apps/admin/dist`                |
 | `npm run ios`                             | `expo run:ios` in `apps/mobile` (native build + Simulator) |
 | `npm run typecheck`                       | `tsc --noEmit` in every workspace                          |
 | `npm run lint` / `npm run lint:fix`       | ESLint in every workspace                                  |

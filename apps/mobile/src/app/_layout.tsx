@@ -10,6 +10,7 @@ import { useColorScheme } from 'react-native';
 import { runDailyTaskIfDue } from '@/curation/daily';
 import { useAppActive } from '@/lib/app-state';
 import { configureNotifications, useDailyReminderTap } from '@/lib/notifications';
+import { sweepThumbnailCache } from '@/lib/temp-files';
 import { useAppConfigSync } from '@/state/app-config';
 import { useJobsSync } from '@/state/jobs';
 import { loadSession, refreshMe, useSession } from '@/state/session';
@@ -28,6 +29,8 @@ export default function RootLayout() {
   const ready = signedIn && onboarded;
 
   useEffect(() => {
+    // Upload thumbnails left behind by an upload that never finished (e.g. the app was killed).
+    sweepThumbnailCache();
     loadSession().finally(() => SplashScreen.hideAsync());
   }, []);
 

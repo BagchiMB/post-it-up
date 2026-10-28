@@ -94,8 +94,13 @@ function describe(j: Job) {
   if (j.status === 'running') return `${j.progress ?? 'Working'}…`;
   if (j.status === 'failed' || !j.result) return j.error ?? 'Failed';
   const { posts } = j.result;
+  const posted = posts.filter((p) => p.postedAt).length;
+  const progress =
+    posted === posts.length
+      ? `✓ ${posted} of ${posts.length} posted`
+      : `${posted} of ${posts.length} posted`;
   const songs = posts.map((p) => p.song.title).join(', ');
-  return `${j.request.auto ? 'Daily · ' : ''}${posts.length} post${posts.length === 1 ? '' : 's'} · ♪ ${songs}`;
+  return `${j.request.auto ? 'Daily · ' : ''}${progress} · ♪ ${songs}`;
 }
 
 function Thumb({ job }: { job: Job }) {

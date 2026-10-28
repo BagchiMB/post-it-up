@@ -12,7 +12,7 @@ import {
   spotifyClientSecret,
 } from '../server-settings.ts';
 import { findTrack, requestAppToken } from '../spotify.ts';
-import { usd } from './layout.ts';
+import { usd } from './format.ts';
 
 export type CheckResult = {
   id: string;

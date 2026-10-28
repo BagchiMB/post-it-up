@@ -28,7 +28,8 @@ export async function displayUri(id: string) {
 }
 
 /** Downloads the stock photo at thumbnail size and returns it as raw base64 (no data: prefix). */
-export async function thumbnail(c: Candidate) {
+/** Same shape as on iOS; there's no temporary file here (`uri` is empty). */
+export async function thumbnail(c: Candidate): Promise<{ base64: string; uri: string }> {
   const res = await fetch(`https://picsum.photos/id/${c.id}/410/512.jpg`);
   if (!res.ok) throw new Error(`Couldn’t load sample photo ${c.id}.`);
   const blob = await res.blob();
@@ -38,5 +39,5 @@ export async function thumbnail(c: Candidate) {
     reader.onerror = () => reject(reader.error);
     reader.readAsDataURL(blob);
   });
-  return dataUrl.slice(dataUrl.indexOf(',') + 1);
+  return { base64: dataUrl.slice(dataUrl.indexOf(',') + 1), uri: '' };
 }

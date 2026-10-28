@@ -92,6 +92,32 @@ export function linkCost(res: Response, cost: number | null, model: string | nul
   if (id) run('UPDATE integration_calls SET cost_usd = ?, model = ? WHERE id = ?', cost, model, id);
 }
 
+/** Marks a failed call's log row with a classification, e.g. `out_of_credits`. */
+export function markOutcome(res: Response, outcome: string) {
+  const id = ids.get(res);
+  if (id)
+    run(
+      "UPDATE integration_calls SET error = ? || ': ' || COALESCE(error, '') WHERE id = ?",
+      outcome,
+      id,
+    );
+}
+
+/**
+ * Whether OpenRouter chat calls are currently failing for lack of credits: the newest
+ * out_of_credits failure is more recent than the newest successful chat call.
+ */
+export function outOfCreditsState() {
+  const lastFail = one<{ at: number | null }>(
+    "SELECT MAX(at) AS at FROM integration_calls WHERE integration = 'openrouter' AND error LIKE 'out_of_credits%'",
+  )!.at;
+  if (!lastFail) return null;
+  const lastOk = one<{ at: number | null }>(
+    "SELECT MAX(at) AS at FROM integration_calls WHERE integration = 'openrouter' AND operation LIKE '%chat' AND ok = 1",
+  )!.at;
+  return lastOk && lastOk > lastFail ? null : { lastFailureAt: lastFail };
+}
+
 /** Overview: failed calls in the last 24 h. */
 export const failuresSince = (since: number) =>
   one<{ n: number }>('SELECT COUNT(*) AS n FROM integration_calls WHERE ok = 0 AND at >= ?', since)!

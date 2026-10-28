@@ -3,6 +3,7 @@ import { deleteCookie, getCookie, setCookie } from 'hono/cookie';
 
 import { clientIp } from '../auth.ts';
 import { config } from '../config.ts';
+import { sha256 } from '../crypto.ts';
 import { ApiError, readJson } from '../http.ts';
 import { log } from '../log.ts';
 import {
@@ -15,8 +16,10 @@ import {
   validSession,
 } from './account.ts';
 import { adminApi } from './api.ts';
-import { layout } from './layout.ts';
-import { navItems, PAGES } from './pages.ts';
+import { dbApi } from './db-api.ts';
+import { closeWriteWindow } from './db-browser.ts';
+import { sessionView } from './session.ts';
+import { spaRoutes } from './spa.ts';
 
 const COOKIE = 'postitup_admin';
 
@@ -28,16 +31,10 @@ const isHttps = (c: Context) =>
 
 const secureHeaders: MiddlewareHandler = async (c, next) => {
   await next();
-  c.header('Cache-Control', 'no-store');
+  if (!c.res.headers.has('Cache-Control')) c.header('Cache-Control', 'no-store');
   c.header('X-Frame-Options', 'DENY');
   c.header('Referrer-Policy', 'no-referrer');
   c.header('X-Content-Type-Options', 'nosniff');
-  if ((c.res.headers.get('Content-Type') ?? '').startsWith('text/html')) {
-    c.header(
-      'Content-Security-Policy',
-      "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'; img-src 'self' data:; frame-ancestors 'none'; base-uri 'none'; form-action 'self'",
-    );
-  }
 };
 
 const requireJson: MiddlewareHandler = async (c, next) => {
@@ -71,34 +68,6 @@ adminRoutes.use('*', secureHeaders);
 
 // Sign-in ----------------------------------------------------------------------
 
-adminRoutes.get('/login', (c) => {
-  if (validSession(getCookie(c, COOKIE))) return c.redirect('/admin', 302);
-  const enabled = loginEnabled();
-  return c.html(
-    layout({
-      title: 'Sign in',
-      body: `<div class="login-wrap"><form class="login" id="login">
-        <div class="brand"><strong>Post It Up</strong><span>Admin</span></div>
-        <h1>Sign in</h1>
-        <p class="sub">Manage models, prompts, integrations and users.</p>
-        ${enabled ? '' : '<p class="callout">Admin sign-in is disabled. Set ADMIN_USERNAME and ADMIN_PASSWORD in the server\'s .env and restart it.</p>'}
-        <label for="username">Username</label>
-        <input id="username" autocomplete="username" autocapitalize="none" spellcheck="false" required${enabled ? ' autofocus' : ' disabled'}>
-        <label for="password">Password</label>
-        <input id="password" type="password" autocomplete="current-password" required${enabled ? '' : ' disabled'}>
-        <button type="submit"${enabled ? '' : ' disabled'}>Log in</button>
-        <div class="msg" id="msg" role="alert"></div>
-      </form></div>`,
-      script: `
-      $('login').addEventListener('submit', async (e) => {
-        e.preventDefault(); say('msg', '');
-        try { await api('POST', '/admin/login', { username: $('username').value, password: $('password').value }); location.href = '/admin'; }
-        catch (err) { say('msg', err.message, 'bad'); $('password').value = ''; }
-      });`,
-    }),
-  );
-});
-
 adminRoutes.post('/login', requireJson, async (c) => {
   if (!loginEnabled()) {
     throw new ApiError(
@@ -131,7 +100,10 @@ adminRoutes.post('/login', requireJson, async (c) => {
 
 adminRoutes.post('/logout', requireJson, (c) => {
   const cookie = getCookie(c, COOKIE);
-  if (cookie) endSession(cookie);
+  if (cookie) {
+    endSession(cookie);
+    closeWriteWindow(sha256(cookie)); // DB write mode ends with the session
+  }
   deleteCookie(c, COOKIE, { path: '/admin' });
   return c.body(null, 204);
 });
@@ -144,33 +116,17 @@ const requireAdminApi: MiddlewareHandler<AdminEnv> = async (c, next) => {
   c.set('adminSession', cookie);
   await next();
 };
+/** Unauthenticated: lets the login page say "admin login disabled" before anyone submits. */
+adminRoutes.get('/api/login-status', (c) => c.json({ enabled: loginEnabled() }));
+
 adminRoutes.use('/api/*', requireAdminApi, requireJson);
+
+/** For the SPA: who is signed in (401 when not). */
+adminRoutes.get('/api/session', (c) => c.json(sessionView()));
+adminRoutes.route('/api/db', dbApi);
 adminRoutes.route('/api', adminApi);
 
-// Pages ---------------------------------------------------------------------------
-
-const requireAdminPage: MiddlewareHandler<AdminEnv> = async (c, next) => {
-  const cookie = getCookie(c, COOKIE);
-  if (!cookie || !validSession(cookie)) return c.redirect('/admin/login', 302);
-  c.set('adminSession', cookie);
-  await next();
-};
-
-for (const page of PAGES) {
-  const sub = page.path.replace(/^\/admin/, '') || '/';
-  adminRoutes.get(sub, requireAdminPage, async (c) => {
-    const out = await page.render(c);
-    return c.html(
-      layout({
-        title: out.title ?? page.title,
-        ...((out.description ?? page.description)
-          ? { description: out.description ?? page.description }
-          : {}),
-        body: out.body,
-        ...(out.script ? { script: out.script } : {}),
-        nav: navItems(),
-        current: page.section ?? page.path,
-      }),
-    );
-  });
-}
+// UI ------------------------------------------------------------------------------
+// The React admin (apps/admin, built to apps/admin/dist). Every non-API GET /admin/* is the SPA;
+// without a build it's a plain 503 telling you how to build it.
+adminRoutes.route('/', spaRoutes);

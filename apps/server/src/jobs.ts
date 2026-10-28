@@ -18,6 +18,7 @@ import { all, one, run } from './db.ts';
 import { ApiError, readJson } from './http.ts';
 import { log, logError } from './log.ts';
 import { notifyJobFinished } from './ntfy.ts';
+import { OutOfCreditsError } from './openrouter.ts';
 import { changeSong, runPipeline } from './pipeline.ts';
 import type { PromptVersionsUsed } from './prompts.ts';
 import { serverSettings } from './server-settings.ts';
@@ -164,7 +165,11 @@ async function runJob(id: string) {
       log(`job ${id} cancelled`);
       return;
     }
-    const message = (e as Error).message || 'Something went wrong.';
+    // Out of OpenRouter credits: users get a generic message; the details are in the admin logs.
+    const message =
+      e instanceof OutOfCreditsError
+        ? e.userMessage
+        : (e as Error).message || 'Something went wrong.';
     const now = Date.now();
     const res = run(
       `UPDATE jobs SET status = 'failed', progress = NULL, error = ?, result = NULL, prompt_versions = ?,
@@ -490,7 +495,10 @@ async function runMusicChange(jobId: string, index: number, userRequest: string)
     });
     if (ok) log(`job ${jobId} post ${index + 1}: music changed`);
   } catch (e) {
-    const message = (e as Error).message || 'Couldn’t change the music.';
+    const message =
+      e instanceof OutOfCreditsError
+        ? e.userMessage
+        : (e as Error).message || 'Couldn’t change the music.';
     patchPost(jobId, index, (p) =>
       p.musicStatus === 'changing' ? { ...p, musicStatus: 'failed', musicError: message } : null,
     );
@@ -561,5 +569,30 @@ jobRoutes.post('/:id/posts/:index/use-alternative', (c) => {
     return { ...rest, song: alternative, previousSongs: [p.song, ...p.previousSongs] };
   });
   log(`job ${r.id} post ${index + 1}: switched to the alternative song`);
+  return c.json(toJob(getRow(r.id)!));
+});
+
+/** Marks a post as published on Instagram (or undoes it). When every post is posted, the thumbnails go now. */
+jobRoutes.post('/:id/posts/:index/posted', async (c) => {
+  const r = ownJob(c.get('userId'), c.req.param('id'));
+  const index = Number(c.req.param('index'));
+  const { posted } = await readJson(c);
+  if (typeof posted !== 'boolean') throw new ApiError(400, 'posted must be true or false.');
+  if (r.status !== 'ready' || !r.result) throw new ApiError(409, 'This task isn’t ready yet.');
+  const result = resultOf(r);
+  if (!Number.isInteger(index) || index < 0 || index >= result.posts.length)
+    throw new ApiError(404, 'Post not found.');
+  patchPost(r.id, index, (p) => {
+    if (posted) return p.postedAt ? null : { ...p, postedAt: Date.now() };
+    if (!p.postedAt) return null;
+    const { postedAt: _p, ...rest } = p;
+    return rest;
+  });
+  const after = getRow(r.id)!;
+  if (posted && resultOf(after).posts.every((p) => p.postedAt) && !after.images_deleted) {
+    await rm(jobDir(r.id), { recursive: true, force: true });
+    run('UPDATE jobs SET images_deleted = 1 WHERE id = ?', r.id);
+    log(`job ${r.id}: all posts posted, thumbnails deleted`);
+  }
   return c.json(toJob(getRow(r.id)!));
 });
